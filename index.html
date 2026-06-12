@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sensor Hub</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:system-ui,sans-serif;background:#f5f5f5;color:#222;padding:1.5rem;}
+    h1{font-size:1.3rem;font-weight:600;margin-bottom:.25rem;}
+    #status{font-size:13px;color:#888;margin-bottom:1rem;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:1rem;}
+    .card{background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:14px;}
+    .card .label{font-size:12px;color:#888;margin-bottom:4px;}
+    .card .value{font-size:26px;font-weight:600;}
+    .card .bar-track{height:6px;background:#eee;border-radius:3px;margin-top:8px;overflow:hidden;}
+    .card .bar-fill{height:100%;border-radius:3px;transition:width .6s;}
+    .badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:600;}
+    .ok   {background:#d4edda;color:#155724;}
+    .warn {background:#fff3cd;color:#856404;}
+    .alert{background:#f8d7da;color:#721c24;}
+    .chart-box{background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:1rem;}
+    .chart-box h2{font-size:13px;color:#666;margin-bottom:10px;}
+    .alert-box{background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:14px;}
+    .alert-box h2{font-size:13px;color:#666;margin-bottom:8px;}
+    .alert-entry{font-size:12px;font-family:monospace;padding:3px 8px;border-radius:5px;background:#ffeeba;color:#856404;margin-bottom:3px;}
+    .none{font-size:12px;color:#aaa;font-style:italic;}
+  </style>
+</head>
+<body>
+  <h1>Network Sensor Hub</h1>
+  <p id="status">Connecting...</p>
+
+  <div class="grid">
+    <div class="card" id="c-temp">
+      <div class="label">Temperature</div>
+      <div class="value" id="v-temp">—</div>
+      <span class="badge ok" id="b-temp">—</span>
+      <div class="bar-track"><div class="bar-fill" id="bar-temp" style="background:#D85A30;width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">Humidity</div>
+      <div class="value" id="v-hum">—</div>
+      <span class="badge ok" id="b-hum">—</span>
+      <div class="bar-track"><div class="bar-fill" id="bar-hum" style="background:#378ADD;width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">Light</div>
+      <div class="value" id="v-light">—</div>
+      <span class="badge ok" id="b-light">—</span>
+      <div class="bar-track"><div class="bar-fill" id="bar-light" style="background:#EF9F27;width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">Motion</div>
+      <div class="value" id="v-motion">—</div>
+      <span class="badge ok" id="b-motion">—</span>
+      <div class="bar-track"><div class="bar-fill" id="bar-motion" style="background:#7F77DD;width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">Air quality (AQI)</div>
+      <div class="value" id="v-air">—</div>
+      <span class="badge ok" id="b-air">—</span>
+      <div class="bar-track"><div class="bar-fill" id="bar-air" style="background:#1D9E75;width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="label">Sound</div>
+      <div class="value" id="v-sound">—</div>
+      <span class="badge ok" id="b-sound">—</span>
+      <div class="bar-track"><div class="bar-fill" id="bar-sound" style="background:#D4537E;width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="chart-box">
+    <h2>Temperature &amp; Humidity history</h2>
+    <div style="position:relative;height:180px;">
+      <canvas id="histChart" role="img" aria-label="Temperature and humidity history line chart">History chart</canvas>
+    </div>
+  </div>
+
+  <div class="alert-box">
+    <h2>Alert log</h2>
+    <div id="alert-log"><p class="none">No alerts.</p></div>
+  </div>
+
+  <script>
+    const MAX_PTS = 30;
+    const tempData = [], humData = [], labels = [];
+    let alertLog = [];
+    let chart;
+
+    const socket = io();
+    socket.on("connect",    () => document.getElementById("status").textContent = "Live — ESP32 connected");
+    socket.on("disconnect", () => document.getElementById("status").textContent = "Disconnected");
+
+    function badge(id, text, cls) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = "badge " + cls;
+    }
+    function bar(id, pct) {
+      document.getElementById(id).style.width = Math.min(100, Math.max(0, pct)) + "%";
+    }
+
+    socket.on("sensor_update", d => {
+      document.getElementById("v-temp").textContent  = d.temperature != null ? d.temperature.toFixed(1) + "°C" : "—";
+      document.getElementById("v-hum").textContent   = d.humidity    != null ? d.humidity.toFixed(1) + "%" : "—";
+      document.getElementById("v-light").textContent = d.light       != null ? Math.round(d.light) + " lux" : "—";
+      document.getElementById("v-motion").textContent= d.motion ? "Detected!" : "Clear";
+      document.getElementById("v-air").textContent   = d.air_quality != null ? Math.round(d.air_quality) + " AQI" : "—";
+      document.getElementById("v-sound").textContent = d.sound       != null ? Math.round(d.sound) + " dB" : "—";
+
+      badge("b-temp",   d.temperature > 32 ? "High" : "Normal",       d.temperature > 32 ? "warn" : "ok");
+      badge("b-hum",    d.humidity > 80 ? "High" : d.humidity < 30 ? "Low" : "Normal", (d.humidity>80||d.humidity<30)?"warn":"ok");
+      badge("b-light",  d.light > 700 ? "Bright" : d.light < 100 ? "Dark" : "Normal", (d.light>700||d.light<100)?"warn":"ok");
+      badge("b-motion", d.motion ? "Detected" : "Clear",              d.motion ? "warn" : "ok");
+      badge("b-air",    d.air_quality > 100 ? "Poor" : d.air_quality > 60 ? "Fair" : "Good", d.air_quality>100?"alert":d.air_quality>60?"warn":"ok");
+      badge("b-sound",  d.sound > 75 ? "Loud" : "Quiet",             d.sound > 75 ? "warn" : "ok");
+
+      bar("bar-temp",   d.temperature / 50 * 100);
+      bar("bar-hum",    d.humidity);
+      bar("bar-light",  d.light / 10);
+      bar("bar-motion", d.motion ? 100 : 0);
+      bar("bar-air",    d.air_quality / 2);
+      bar("bar-sound",  d.sound);
+
+      if (d.temperature != null) tempData.push(+d.temperature.toFixed(1));
+      if (d.humidity    != null) humData.push(Math.round(d.humidity));
+      const ts = new Date().toLocaleTimeString();
+      labels.push(ts);
+      if (tempData.length > MAX_PTS) { tempData.shift(); humData.shift(); labels.shift(); }
+
+      if (!chart) {
+        chart = new Chart(document.getElementById("histChart"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {label:"Temp °C",  data:tempData, borderColor:"#D85A30", borderWidth:2, pointRadius:2, tension:0.4, backgroundColor:"transparent"},
+              {label:"Humidity %",data:humData, borderColor:"#378ADD", borderWidth:2, pointRadius:2, tension:0.4, backgroundColor:"transparent", borderDash:[5,4]}
+            ]
+          },
+          options: {
+            responsive:true, maintainAspectRatio:false,
+            plugins:{legend:{display:false}},
+            scales:{x:{ticks:{maxTicksLimit:6}}}
+          }
+        });
+      } else {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = tempData;
+        chart.data.datasets[1].data = humData;
+        chart.update("none");
+      }
+
+      if (d.alerts && d.alerts.length) {
+        d.alerts.forEach(a => alertLog.unshift(`[${ts}] ${a}`));
+        if (alertLog.length > 10) alertLog = alertLog.slice(0, 10);
+        document.getElementById("alert-log").innerHTML =
+          alertLog.map(a => `<div class="alert-entry">${a}</div>`).join("");
+      }
+    });
+  </script>
+</body>
+</html>
